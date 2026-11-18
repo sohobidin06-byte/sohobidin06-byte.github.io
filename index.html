@@ -48,7 +48,6 @@ body.rain #cam{top:50%;right:auto;left:50%;transform:translate(-50%,-50%) scaleX
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.js"></script>
 <script>
 const N = 6500, R = 380;
 const MODES = {
@@ -63,7 +62,7 @@ const PALETTES = [
   [[.9,.1,.3],[1,.3,.1],[1,.75,.55]]
 ];
 let mode = 'heart', palette = 0, burst = 0, userScale = 1, targetScale = 1, prevMode = null;
-let visW = 24, visH = 52, baseScale = 1;
+let visW = 24, visH = 52, baseScale = 1, frames = 0;
 
 /* ---------- Three.js ---------- */
 const canvas = document.getElementById('c');
@@ -245,7 +244,7 @@ function onResults(res){
   if(g===stable) count++; else { stable = g; count = 1; }
   if(count===4 && g && g!=='pinch' && g!=='two') act(g);
   if(!g && count>6){ if(active==='down'&&prevMode){setMode(prevMode);prevMode=null;} active = null; }
-  gestEl.textContent = !hs.length ? '✋ Колду камерага көрсөтүңүз' : 'Жест: ' + (label==='swipe' ? NAMES.swipe : (NAMES[g]||'кол көрүндү, жест белгисиз'));
+  gestEl.textContent = !hs.length ? '✋ Колду көрсөтүңүз · кадр '+frames : 'Жест: ' + (label==='swipe' ? NAMES.swipe : (NAMES[g]||'кол көрүндү, жест белгисиз'));
 }
 
 /* ---------- Targets ---------- */
@@ -324,21 +323,36 @@ document.getElementById('go').onclick = async ()=>{
   begin();
   gestEl.textContent = '⏳ Модель жүктөлүүдө…';
   try{
-    const hands = new Hands({locateFile:f=>'https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/'+f});
-    hands.setOptions({maxNumHands:2, modelComplexity:0, minDetectionConfidence:.6, minTrackingConfidence:.5});
-    hands.onResults(onResults);
-    await hands.initialize();
-    gestEl.textContent = '✋ Колду камерага көрсөтүңүз';
-    let busy = false;
-    (function loop(){
-      if(!busy && video.readyState>=2){
-        busy = true;
-        hands.send({image:video}).catch(()=>{}).then(()=>{ busy = false; });
+    const V='0.10.14', base='https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@'+V;
+    const vision = await import(base+'/vision_bundle.mjs');
+    const fileset = await vision.FilesetResolver.forVisionTasks(base+'/wasm');
+    const make = d => vision.HandLandmarker.createFromOptions(fileset,{
+      baseOptions:{modelAssetPath:'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task', delegate:d},
+      runningMode:'VIDEO', numHands:2});
+    const ios = /iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.platform==='MacIntel' && navigator.maxTouchPoints>1);
+    let lm, delegate = ios ? 'CPU' : 'GPU';
+    try{ lm = await make(delegate); }catch(e){ delegate = 'CPU'; lm = await make('CPU'); }
+    gestEl.textContent = '✋ Колду көрсөтүңүз · кадр 0';
+    let errs = 0, lastTs = 0, lastRun = 0;
+    (async function loop(){
+      const now = performance.now();
+      if(video.readyState>=2 && now-lastRun>30){
+        lastRun = now;
+        const ts = Math.max(now, lastTs+1); lastTs = ts;
+        try{
+          const r = lm.detectForVideo(video, ts);
+          frames++;
+          onResults({multiHandLandmarks:r.landmarks});
+        }catch(e){
+          errs++;
+          if(errs===3 && delegate==='GPU'){ try{ delegate='CPU'; lm = await make('CPU'); }catch(e2){} }
+          if(errs>10) gestEl.textContent = '⚠️ '+String(e&&e.message||e).slice(0,60);
+        }
       }
       requestAnimationFrame(loop);
     })();
   }catch(err){
-    gestEl.textContent = '⚠️ Модель жүктөлгөн жок, интернетти текшериңиз';
+    gestEl.textContent = '⚠️ '+String(err&&err.message||err).slice(0,70);
   }
 };
 </script>
