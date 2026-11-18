@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="ky">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Жүрөк бөлүкчөлөрү</title>
+<style>
+:root{--bg:#120006;--panel:rgba(30,6,14,.78);--line:rgba(255,120,80,.28);--red:#d81e3c;--gold:#ffd27a;--text:#ffe9d6}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;overflow:hidden}
+canvas#c{position:fixed;inset:0;width:100%;height:100%;display:block}
+#cam{position:fixed;top:calc(env(safe-area-inset-top,0px) + 10px);right:10px;width:92px;height:68px;object-fit:cover;border-radius:10px;border:1px solid var(--line);transform:scaleX(-1);opacity:.9}
+#cam{transition:all .45s ease}
+body.rain #cam{top:50%;right:auto;left:50%;transform:translate(-50%,-50%) scaleX(-1);width:min(78vw,320px);height:min(58vw,240px);border:2px solid var(--gold);border-radius:14px;opacity:1;box-shadow:0 0 30px rgba(255,120,80,.5);z-index:2}
+#gest{position:fixed;top:calc(env(safe-area-inset-top,0px) + 14px);left:12px;font-size:15px;padding:6px 12px;border-radius:20px;background:var(--panel);border:1px solid var(--line)}
+#bar{position:fixed;left:8px;right:8px;bottom:calc(env(safe-area-inset-bottom,0px) + 8px);display:grid;grid-template-columns:repeat(4,1fr);gap:6px;padding:8px;border-radius:16px;background:var(--panel);border:1px solid var(--line);backdrop-filter:blur(8px)}
+#bar button{font:inherit;font-size:13px;color:var(--text);background:transparent;border:1px solid transparent;border-radius:12px;padding:9px 2px;cursor:pointer}
+#bar button.on{background:var(--red);border-color:var(--gold)}
+#bar button:focus-visible{outline:2px solid var(--gold)}
+#start{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;background:var(--bg);z-index:5;text-align:center;padding:24px}
+#start h1{font-size:28px;margin:0;font-weight:600}
+#start p{margin:0;max-width:320px;opacity:.8;line-height:1.5}
+#start button{font:inherit;font-size:17px;padding:14px 28px;border-radius:30px;border:0;background:var(--red);color:#fff;cursor:pointer}
+#start button.alt{background:transparent;border:1px solid var(--line);font-size:14px;padding:9px 20px}
+#start{background:radial-gradient(ellipse at 30% 40%,#3a0a10 0,var(--bg) 70%)}
+#start .card{width:100%;max-width:380px;padding:28px 22px;border-radius:28px;background:rgba(10,2,6,.85);border:1px solid var(--line);display:flex;flex-direction:column;align-items:center;gap:14px}
+#start .badge{font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--gold);padding:7px 16px;border-radius:20px;border:1px solid rgba(255,210,122,.35);background:rgba(255,210,122,.08)}
+#start h1{font-size:26px}
+#start button{width:100%}
+#hint{font-size:13px;color:#ff9a8a;min-height:1em}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<video id="cam" playsinline muted></video>
+<div id="gest">Жест: —</div>
+<div id="bar"></div>
+<input type="file" id="mf" accept="audio/*" hidden>
+<div id="start">
+  <div class="card">
+    <span class="badge">📷 Камерага уруксат</span>
+    <h1>Камераны күйгүзүү</h1>
+    <p>Сайт колуңуздун жестин таануу үчүн камераны колдонот. Сүрөт же видео эч жакка жөнөтүлбөйт.</p>
+    <button id="go">Камераны күйгүзүү</button>
+    <button id="nocam" class="alt">Камерасыз баштоо</button>
+    <p id="hint"></p>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.js"></script>
+<script>
+const N = 6500, R = 380;
+const MODES = {
+  heart:['🖐 Жүрөк'], heart3d:['✊ Жүрөк 3D'], stream:['☝️ Поток'],
+  rain:['🤟 Жүрөкчөлөр'], galaxy:['✌️ Галактика'], hole:['👎 Тартылуу']
+};
+const ORDER = ['heart','heart3d','stream','rain','galaxy'];
+const PALETTES = [
+  [[1,.1,.12],[1,.5,.1],[1,.92,.45]],
+  [[1,.15,.5],[1,.5,.8],[1,.88,.96]],
+  [[1,.55,.05],[1,.8,.2],[1,1,.7]],
+  [[.9,.1,.3],[1,.3,.1],[1,.75,.55]]
+];
+let mode = 'heart', palette = 0, burst = 0, userScale = 1, targetScale = 1, prevMode = null;
+let visW = 24, visH = 52, baseScale = 1;
+
+/* ---------- Three.js ---------- */
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({canvas, antialias:false});
+renderer.setClearColor(0x120006, 1);
+renderer.autoClear = false;
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(60, 1, .1, 200);
+camera.position.z = 45;
+const fadeScene = new THREE.Scene();
+const fadeCam = new THREE.OrthographicCamera(-1,1,1,-1,0,1);
+const fadeMat = new THREE.MeshBasicMaterial({color:0x120006, transparent:true, opacity:.2, depthTest:false});
+fadeScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2,2), fadeMat));
+const group = new THREE.Group();
+scene.add(group);
+
+function glowTex(){
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const g = c.getContext('2d'), gr = g.createRadialGradient(32,32,0,32,32,32);
+  gr.addColorStop(0,'rgba(255,255,255,1)'); gr.addColorStop(.25,'rgba(255,255,255,.7)'); gr.addColorStop(1,'rgba(255,255,255,0)');
+  g.fillStyle = gr; g.fillRect(0,0,64,64);
+  return new THREE.CanvasTexture(c);
+}
+function heartTex(){
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const g = c.getContext('2d'); g.fillStyle = '#fff'; g.shadowColor = '#fff'; g.shadowBlur = 6;
+  g.beginPath(); g.moveTo(32,56); g.bezierCurveTo(2,34,6,8,22,8); g.bezierCurveTo(28,8,32,13,32,18);
+  g.bezierCurveTo(32,13,36,8,42,8); g.bezierCurveTo(58,8,62,34,32,56); g.fill();
+  return new THREE.CanvasTexture(c);
+}
+
+/* main particles */
+const pos = new Float32Array(N*3), col = new Float32Array(N*3);
+const s1 = new Float32Array(N), s2 = new Float32Array(N), s3 = new Float32Array(N);
+const H2 = new Float32Array(N*3), H3 = new Float32Array(N*3);
+function heartXY(){
+  const t = Math.random()*Math.PI*2;
+  const x = 16*Math.pow(Math.sin(t),3);
+  const y = 13*Math.cos(t)-5*Math.cos(2*t)-2*Math.cos(3*t)-Math.cos(4*t);
+  const k = Math.random() < .5 ? 1 : Math.sqrt(Math.random());
+  return [x*k*.9, y*k*.9+1];
+}
+for(let i=0;i<N;i++){
+  s1[i]=Math.random(); s2[i]=Math.random(); s3[i]=Math.random();
+  let [x,y] = heartXY();
+  H2[i*3]=x; H2[i*3+1]=y; H2[i*3+2]=(Math.random()-.5)*1.5;
+  [x,y] = heartXY();
+  const d = Math.min(1,(x*x+y*y)/300);
+  H3[i*3]=x; H3[i*3+1]=y; H3[i*3+2]=(Math.random()-.5)*14*(1-d*.75);
+  pos[i*3]=(Math.random()-.5)*60; pos[i*3+1]=(Math.random()-.5)*60; pos[i*3+2]=(Math.random()-.5)*20;
+}
+function paint(){
+  const p = PALETTES[palette];
+  for(let i=0;i<N;i++){
+    const r = s1[i]; let a, b, f;
+    if(r<.5){a=p[0];b=p[1];f=r*2}else{a=p[1];b=p[2];f=(r-.5)*2}
+    col[i*3]=a[0]+(b[0]-a[0])*f; col[i*3+1]=a[1]+(b[1]-a[1])*f; col[i*3+2]=a[2]+(b[2]-a[2])*f;
+  }
+  geo.attributes.color.needsUpdate = true;
+}
+const geo = new THREE.BufferGeometry();
+geo.setAttribute('position', new THREE.BufferAttribute(pos,3));
+geo.setAttribute('color', new THREE.BufferAttribute(col,3));
+const pts = new THREE.Points(geo, new THREE.PointsMaterial({size:.55, map:glowTex(), vertexColors:true, transparent:true, blending:THREE.AdditiveBlending, depthWrite:false}));
+group.add(pts);
+paint();
+
+/* falling hearts */
+const M = 260, rp = new Float32Array(M*3), rc = new Float32Array(M*3), rs = new Float32Array(M);
+const hcols = [[1,.15,.25],[1,.4,.55],[1,.75,.2],[.9,.1,.3]];
+for(let i=0;i<M;i++){
+  const c = hcols[i%4]; rc.set(c, i*3); rs[i] = .6+Math.random()*1.2; rp[i*3+2] = (Math.random()-.3)*14;
+  rp[i*3] = (Math.random()-.5)*30; rp[i*3+1] = (Math.random()-.5)*60;
+}
+const rgeo = new THREE.BufferGeometry();
+rgeo.setAttribute('position', new THREE.BufferAttribute(rp,3));
+rgeo.setAttribute('color', new THREE.BufferAttribute(rc,3));
+const rain = new THREE.Points(rgeo, new THREE.PointsMaterial({size:2.4, map:heartTex(), vertexColors:true, transparent:true, depthWrite:false}));
+rain.visible = false; scene.add(rain);
+
+function resize(){
+  const w = innerWidth, h = innerHeight;
+  renderer.setPixelRatio(Math.min(devicePixelRatio,2)); renderer.setSize(w,h,false);
+  camera.aspect = w/h; camera.updateProjectionMatrix();
+  visH = 2*45*Math.tan(THREE.MathUtils.degToRad(30)); visW = visH*camera.aspect;
+  baseScale = Math.min(1.1, visW*.88/30);
+  for(let i=0;i<M;i++) rp[i*3] = (Math.random()-.5)*visW;
+}
+addEventListener('resize', resize); resize();
+
+/* ---------- Modes / UI ---------- */
+const bar = document.getElementById('bar'), gestEl = document.getElementById('gest');
+const btns = {};
+function mkBtn(id, label, fn){
+  const b = document.createElement('button'); b.textContent = label; b.onclick = fn; bar.appendChild(b); btns[id] = b;
+}
+mkBtn('music','🎵 Музыка',()=>mf.click());
+['heart','heart3d','stream','rain','galaxy'].forEach(m=>mkBtn(m, MODES[m][0], ()=>setMode(m)));
+mkBtn('burst','👍 Түс',()=>{burst=3; palette=(palette+1)%PALETTES.length; paint();});
+mkBtn('hole','👎 Тартылуу',()=>setMode(mode==='hole'?'heart':'hole'));
+function setMode(m){
+  if(m===mode) return; mode = m;
+  rain.visible = m==='rain'; pts.visible = m!=='rain';
+  document.body.classList.toggle('rain', m==='rain');
+  for(const k in btns) btns[k].classList.toggle('on', k===m);
+}
+setMode('stream'); setMode('heart');
+
+/* music */
+const mf = document.getElementById('mf'); let audio = null;
+mf.onchange = ()=>{
+  const f = mf.files[0]; if(!f) return;
+  if(audio){audio.pause(); URL.revokeObjectURL(audio.src);}
+  audio = new Audio(URL.createObjectURL(f)); audio.loop = true; audio.play().catch(()=>{});
+  btns.music.classList.add('on');
+};
+
+/* ---------- Gestures ---------- */
+const NAMES = {open:'🖐 Ачык алакан',fist:'✊ Жумрук',one:'☝️ Бир манжа',peace:'✌️ Виктория',up:'👍 Жакшы',down:'👎 Жаман',ily:'🤟 Сүйөм',pinch:'🤏 Чымчуу',heart2:'🫶 Эки колдон жүрөк',swipe:'👋 Шилтөө',two:'👐 Эки кол'};
+const d2 = (a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
+function classify(l){
+  const w = l[0], sc = d2(l[0],l[9]);
+  const ext = (t,p)=>d2(l[t],w) > d2(l[p],w)*1.12;
+  const idx=ext(8,6), mid=ext(12,10), rng=ext(16,14), pnk=ext(20,18);
+  const thb = d2(l[4],l[17]) > d2(l[3],l[17])*1.05 && d2(l[4],l[5]) > sc*.35;
+  const pinchD = d2(l[4],l[8]);
+  if(pinchD < sc*.32 && (mid||rng)) return {g:'pinch', v:pinchD/sc};
+  if(thb&&idx&&pnk&&!mid&&!rng) return {g:'ily'};
+  if(idx&&mid&&rng&&pnk) return {g:'open'};
+  if(idx&&mid&&!rng&&!pnk) return {g:'peace'};
+  if(idx&&!mid&&!rng&&!pnk) return {g:'one'};
+  if(thb&&!idx&&!mid&&!rng&&!pnk) return {g: l[4].y < l[2].y-sc*.2 ? 'up' : (l[4].y > l[2].y+sc*.2 ? 'down' : 'fist')};
+  if(!idx&&!mid&&!rng&&!pnk) return {g:'fist'};
+  return {g:null};
+}
+let stable = null, count = 0, active = null, swipeHist = [], lastSwipe = 0;
+const handT = {x:0,y:0,rz:0,has:false}, rollT = {v:0};
+function act(g){
+  if(g===active) return; const was = active; active = g;
+  if(was==='down' && prevMode){ setMode(prevMode); prevMode = null; }
+  if(g==='open') setMode('heart');
+  else if(g==='fist') setMode('heart3d');
+  else if(g==='one') setMode('stream');
+  else if(g==='ily') setMode('rain');
+  else if(g==='peace') setMode('galaxy');
+  else if(g==='up'){ burst=3; palette=(palette+1)%PALETTES.length; paint(); }
+  else if(g==='down'){ prevMode = mode==='hole'?'heart':mode; setMode('hole'); }
+  else if(g==='heart2'){ setMode('heart'); burst=2.5; }
+}
+function onResults(res){
+  const hs = res.multiHandLandmarks || [];
+  let g = null, label = '—';
+  targetScale = 1;
+  if(!hs.length){ handT.has = false; }
+  else {
+    const a = hs[0], now = performance.now()/1000;
+    handT.has = true;
+    handT.x = (.5-a[9].x)*visW*.8; handT.y = (.5-a[9].y)*visH*.8;
+    const ang = Math.atan2(-(a[9].x-a[0].x), -(a[9].y-a[0].y));
+    rollT.v = -ang*.8;
+    if(hs.length===2){
+      const b = hs[1];
+      if(d2(a[4],b[4])<.1 && d2(a[8],b[8])<.12) g='heart2';
+      else { g='two'; targetScale = THREE.MathUtils.clamp(d2(a[0],b[0])*3.2,.5,2.6); }
+    } else {
+      const r = classify(a); g = r.g;
+      if(g==='pinch') targetScale = THREE.MathUtils.clamp(.5+r.v*6,.5,2.4);
+      if(g==='open'){
+        swipeHist.push({t:now,x:1-a[9].x}); swipeHist = swipeHist.filter(p=>now-p.t<.3);
+        const dx = swipeHist.length>2 ? swipeHist[swipeHist.length-1].x - swipeHist[0].x : 0;
+        if(Math.abs(dx)>.28 && now-lastSwipe>.9){
+          lastSwipe = now; swipeHist = [];
+          const i = ORDER.indexOf(mode), k = ORDER.length;
+          setMode(ORDER[(i + (dx>0?1:k-1) + (i<0?1:0)) % k]); active = null; stable = null; label = 'swipe';
+        }
+      } else swipeHist = [];
+    }
+  }
+  if(g===stable) count++; else { stable = g; count = 1; }
+  if(count===4 && g && g!=='pinch' && g!=='two') act(g);
+  if(!g && count>6){ if(active==='down'&&prevMode){setMode(prevMode);prevMode=null;} active = null; }
+  gestEl.textContent = !hs.length ? '✋ Колду камерага көрсөтүңүз' : 'Жест: ' + (label==='swipe' ? NAMES.swipe : (NAMES[g]||'кол көрүндү, жест белгисиз'));
+}
+
+/* ---------- Targets ---------- */
+const V = {x:0,y:0,z:0};
+function target(i, t){
+  const a = s1[i], b = s2[i], c = s3[i];
+  switch(mode){
+    case 'heart': V.x=H2[i*3]; V.y=H2[i*3+1]; V.z=H2[i*3+2]; break;
+    case 'heart3d': {
+      const ca = Math.cos(t*.7), sa = Math.sin(t*.7), x = H3[i*3], z = H3[i*3+2];
+      V.x = x*ca + z*sa; V.y = H3[i*3+1]; V.z = -x*sa + z*ca; break; }
+    case 'stream': {
+      const y = (((b*60 - t*9) % 60)+60)%60 - 30;
+      V.x = (a-.5)*visW*.55 + Math.sin(y*.25+t*1.4+c*6)*3; V.y = y; V.z = (c-.5)*12; break; }
+    case 'galaxy': case 'hole': {
+      const k = mode==='hole' ? .22 : 1, r = Math.pow(a,.7)*19*k, ar = (c*4|0)*1.57 + r*.45*(mode==='hole'?3:1) + t*(mode==='hole'?1.6:.45);
+      V.x = Math.cos(ar)*r + (b-.5)*1.4; V.y = Math.sin(ar)*r*.9 + (c-.5)*1.4; V.z = (b-.5)*3; break; }
+    default: V.x = H2[i*3]; V.y = H2[i*3+1]; V.z = 0;
+  }
+}
+const clock = new THREE.Clock();
+function frame(){
+  requestAnimationFrame(frame);
+  const t = clock.getElapsedTime(), dt = Math.min(clock.getDelta(), .05);
+  userScale += (targetScale-userScale)*.12;
+  const s = baseScale*userScale;
+  group.scale.setScalar(s);
+  group.position.x += ((handT.has?handT.x:0)-group.position.x)*.15;
+  group.position.y += ((handT.has?handT.y:0)-group.position.y)*.15;
+  group.rotation.z += ((handT.has?rollT.v:0)-group.rotation.z)*.1;
+  burst *= .94;
+  if(mode==='rain'){
+    for(let i=0;i<M;i++){
+      rp[i*3+1] -= rs[i]*.22; rp[i*3] += Math.sin(t*1.3+i)*.02;
+      if(rp[i*3+1] < -visH/2-2){ rp[i*3+1] = visH/2+2; rp[i*3] = (Math.random()-.5)*visW; }
+    }
+    rgeo.attributes.position.needsUpdate = true;
+  } else {
+    const e = mode==='stream' ? .12 : .075, bm = 1 + burst*(.6+s2[0]);
+    for(let i=0;i<N;i++){
+      target(i,t);
+      const k = 1 + burst*(.5+s2[i]*1.2);
+      const j = .12;
+      pos[i*3]   += (V.x*k + (Math.random()-.5)*j - pos[i*3])*e;
+      pos[i*3+1] += (V.y*k + (Math.random()-.5)*j - pos[i*3+1])*e;
+      pos[i*3+2] += (V.z*k - pos[i*3+2])*e;
+    }
+    geo.attributes.position.needsUpdate = true;
+  }
+  renderer.clear();
+  renderer.render(fadeScene, fadeCam);
+  renderer.clearDepth();
+  renderer.render(scene, camera);
+}
+
+/* ---------- Start ---------- */
+const startEl = document.getElementById('start'), video = document.getElementById('cam');
+let started = false;
+function begin(){ startEl.style.display = 'none'; if(!started){ started = true; frame(); } }
+document.getElementById('nocam').onclick = ()=>{ video.style.display='none'; gestEl.textContent='Жест: камерасыз'; begin(); };
+document.getElementById('go').onclick = async ()=>{
+  const btn = document.getElementById('go'), hint = document.getElementById('hint');
+  btn.disabled = true; btn.textContent = '⏳ Күтүңүз…'; hint.textContent = '';
+  let stream;
+  try{
+    stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:{ideal:640},height:{ideal:480}},audio:false});
+  }catch(err){
+    btn.disabled = false; btn.textContent = 'Кайра аракет кылуу';
+    hint.textContent = (err && err.name==='NotAllowedError')
+      ? 'Камера бөгөттөлгөн. Баптоолор → Safari → Камера → «Спросить» же «Разрешить» деп коюңуз.'
+      : 'Камера ачылган жок: ' + ((err && err.name) || 'ката');
+    return;
+  }
+  video.srcObject = stream; video.muted = true; video.setAttribute('playsinline','');
+  try{ await video.play(); }catch(e){}
+  begin();
+  gestEl.textContent = '⏳ Модель жүктөлүүдө…';
+  try{
+    const hands = new Hands({locateFile:f=>'https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/'+f});
+    hands.setOptions({maxNumHands:2, modelComplexity:0, minDetectionConfidence:.6, minTrackingConfidence:.5});
+    hands.onResults(onResults);
+    await hands.initialize();
+    gestEl.textContent = '✋ Колду камерага көрсөтүңүз';
+    let busy = false;
+    (function loop(){
+      if(!busy && video.readyState>=2){
+        busy = true;
+        hands.send({image:video}).catch(()=>{}).then(()=>{ busy = false; });
+      }
+      requestAnimationFrame(loop);
+    })();
+  }catch(err){
+    gestEl.textContent = '⚠️ Модель жүктөлгөн жок, интернетти текшериңиз';
+  }
+};
+</script>
+</body>
+</html>
