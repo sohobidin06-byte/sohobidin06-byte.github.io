@@ -14,7 +14,7 @@ canvas#c{position:fixed;inset:0;width:100%;height:100%;display:block}
 body.rain #cam{top:50%;right:auto;left:50%;transform:translate(-50%,-50%) scaleX(-1);width:min(78vw,320px);height:min(58vw,240px);border:2px solid var(--gold);border-radius:14px;opacity:1;box-shadow:0 0 30px rgba(255,120,80,.5);z-index:2}
 #gest{position:fixed;top:calc(env(safe-area-inset-top,0px) + 14px);left:12px;font-size:15px;padding:6px 12px;border-radius:20px;background:var(--panel);border:1px solid var(--line)}
 #bar{position:fixed;left:8px;right:8px;bottom:calc(env(safe-area-inset-bottom,0px) + 8px);display:grid;grid-template-columns:repeat(4,1fr);gap:6px;padding:8px;border-radius:16px;background:var(--panel);border:1px solid var(--line);backdrop-filter:blur(8px)}
-#bar button{font:inherit;font-size:13px;color:var(--text);background:transparent;border:1px solid transparent;border-radius:12px;padding:9px 2px;cursor:pointer}
+#bar button,#bar label{display:flex;align-items:center;justify-content:center;text-align:center;font:inherit;font-size:13px;color:var(--text);background:transparent;border:1px solid transparent;border-radius:12px;padding:9px 2px;cursor:pointer;min-height:38px}
 #bar button.on{background:var(--red);border-color:var(--gold)}
 #bar button:focus-visible{outline:2px solid var(--gold)}
 #start{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;background:var(--bg);z-index:5;text-align:center;padding:24px}
@@ -27,6 +27,8 @@ body.rain #cam{top:50%;right:auto;left:50%;transform:translate(-50%,-50%) scaleX
 #start .badge{font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--gold);padding:7px 16px;border-radius:20px;border:1px solid rgba(255,210,122,.35);background:rgba(255,210,122,.08)}
 #start h1{font-size:26px}
 #start button{width:100%}
+#start input{width:100%;padding:13px 16px;font:inherit;font-size:17px;text-align:center;color:var(--text);background:rgba(255,255,255,.06);border:1px solid var(--line);border-radius:16px;outline:none}
+#start input:focus{border-color:var(--gold)}
 #hint{font-size:13px;color:#ff9a8a;min-height:1em}
 </style>
 </head>
@@ -41,6 +43,8 @@ body.rain #cam{top:50%;right:auto;left:50%;transform:translate(-50%,-50%) scaleX
     <span class="badge">📷 Камерага уруксат</span>
     <h1>Камераны күйгүзүү</h1>
     <p>Сайт колуңуздун жестин таануу үчүн камераны колдонот. Сүрөт же видео эч жакка жөнөтүлбөйт.</p>
+    <input id="nm" type="text" maxlength="20" placeholder="Атыңызды жазыңыз" autocomplete="off">
+    <p style="font-size:13px">☝️ Бир манжаңызды көрсөтсөңүз, атыңыз жүрөк бөлүкчөлөрүнөн чыгат</p>
     <button id="go">Камераны күйгүзүү</button>
     <button id="nocam" class="alt">Камерасыз баштоо</button>
     <p id="hint"></p>
@@ -51,17 +55,17 @@ body.rain #cam{top:50%;right:auto;left:50%;transform:translate(-50%,-50%) scaleX
 <script>
 const N = 6500, R = 380;
 const MODES = {
-  heart:['🖐 Жүрөк'], heart3d:['✊ Жүрөк 3D'], stream:['☝️ Поток'],
+  name:['☝️ Ат'], heart:['🖐 Жүрөк'], heart3d:['✊ Жүрөк 3D'], stream:['☝️ Поток'],
   rain:['🤟 Жүрөкчөлөр'], galaxy:['✌️ Галактика'], hole:['👎 Тартылуу']
 };
-const ORDER = ['heart','heart3d','stream','rain','galaxy'];
+const ORDER = ['heart','heart3d','name','stream','rain','galaxy'];
 const PALETTES = [
   [[1,.1,.12],[1,.5,.1],[1,.92,.45]],
   [[1,.15,.5],[1,.5,.8],[1,.88,.96]],
   [[1,.55,.05],[1,.8,.2],[1,1,.7]],
   [[.9,.1,.3],[1,.3,.1],[1,.75,.55]]
 ];
-let mode = 'heart', palette = 0, burst = 0, userScale = 1, targetScale = 1, prevMode = null;
+let NAME = '', mode = 'heart', palette = 0, burst = 0, userScale = 1, targetScale = 1, prevMode = null;
 let visW = 24, visH = 52, baseScale = 1, frames = 0;
 
 /* ---------- Three.js ---------- */
@@ -74,7 +78,7 @@ const camera = new THREE.PerspectiveCamera(60, 1, .1, 200);
 camera.position.z = 45;
 const fadeScene = new THREE.Scene();
 const fadeCam = new THREE.OrthographicCamera(-1,1,1,-1,0,1);
-const fadeMat = new THREE.MeshBasicMaterial({color:0x120006, transparent:true, opacity:.2, depthTest:false});
+const fadeMat = new THREE.MeshBasicMaterial({color:0x120006, transparent:true, opacity:.16, depthTest:false});
 fadeScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2,2), fadeMat));
 const group = new THREE.Group();
 scene.add(group);
@@ -121,12 +125,15 @@ function paint(){
     if(r<.5){a=p[0];b=p[1];f=r*2}else{a=p[1];b=p[2];f=(r-.5)*2}
     col[i*3]=a[0]+(b[0]-a[0])*f; col[i*3+1]=a[1]+(b[1]-a[1])*f; col[i*3+2]=a[2]+(b[2]-a[2])*f;
   }
+  for(let i=0;i<N;i++) for(let k=0;k<3;k++){ lc[i*6+k]=col[i*3+k]*.1; lc[i*6+3+k]=Math.min(1,col[i*3+k]*1.4); }
   geo.attributes.color.needsUpdate = true;
 }
 const geo = new THREE.BufferGeometry();
-geo.setAttribute('position', new THREE.BufferAttribute(pos,3));
-geo.setAttribute('color', new THREE.BufferAttribute(col,3));
-const pts = new THREE.Points(geo, new THREE.PointsMaterial({size:.55, map:glowTex(), vertexColors:true, transparent:true, blending:THREE.AdditiveBlending, depthWrite:false}));
+const lp = new Float32Array(N*6), lc = new Float32Array(N*6), pv = new Float32Array(N*3);
+pv.set(pos);
+geo.setAttribute('position', new THREE.BufferAttribute(lp,3));
+geo.setAttribute('color', new THREE.BufferAttribute(lc,3));
+const pts = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({vertexColors:true, transparent:true, blending:THREE.AdditiveBlending, depthWrite:false}));
 group.add(pts);
 paint();
 
@@ -145,7 +152,7 @@ rain.visible = false; scene.add(rain);
 
 function resize(){
   const w = innerWidth, h = innerHeight;
-  renderer.setPixelRatio(Math.min(devicePixelRatio,2)); renderer.setSize(w,h,false);
+  renderer.setPixelRatio(Math.min(devicePixelRatio,1.25)); renderer.setSize(w,h,false);
   camera.aspect = w/h; camera.updateProjectionMatrix();
   visH = 2*45*Math.tan(THREE.MathUtils.degToRad(30)); visW = visH*camera.aspect;
   baseScale = Math.min(1.1, visW*.88/30);
@@ -159,25 +166,89 @@ const btns = {};
 function mkBtn(id, label, fn){
   const b = document.createElement('button'); b.textContent = label; b.onclick = fn; bar.appendChild(b); btns[id] = b;
 }
-mkBtn('music','🎵 Музыка',()=>mf.click());
-['heart','heart3d','stream','rain','galaxy'].forEach(m=>mkBtn(m, MODES[m][0], ()=>setMode(m)));
-mkBtn('burst','👍 Түс',()=>{burst=3; palette=(palette+1)%PALETTES.length; paint();});
+['name','heart','heart3d','stream','rain','galaxy'].forEach(m=>mkBtn(m, MODES[m][0], ()=>setMode(m)));
 mkBtn('hole','👎 Тартылуу',()=>setMode(mode==='hole'?'heart':'hole'));
+mkBtn('music','🎵 Музыка',()=>musicToggle());
+const pick = document.createElement('label'); pick.htmlFor = 'mf'; pick.textContent = '📂 Ыр тандоо'; bar.appendChild(pick);
+mkBtn('burst','👍 Түс',()=>{burst=3; palette=(palette+1)%PALETTES.length; paint();});
 function setMode(m){
+  if(m==='name' && !NAME) m = 'stream';
   if(m===mode) return; mode = m;
   rain.visible = m==='rain'; pts.visible = m!=='rain';
   document.body.classList.toggle('rain', m==='rain');
-  for(const k in btns) btns[k].classList.toggle('on', k===m);
+  for(const k in MODES) if(btns[k]) btns[k].classList.toggle('on', k===m);
 }
 setMode('stream'); setMode('heart');
 
+/* name */
+const NT = new Float32Array(N*3);
+function setName(raw){
+  NAME = (raw||'').trim().slice(0,20);
+  try{ localStorage.setItem('hname', NAME); }catch(e){}
+  if(!NAME) return;
+  const W = 640, H = 200, c = document.createElement('canvas'); c.width = W; c.height = H;
+  const g = c.getContext('2d'); g.fillStyle = '#fff'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  let fs = 150;
+  do{ g.font = '800 '+fs+'px system-ui,-apple-system,"Segoe UI",Arial,sans-serif'; fs -= 6; }while(g.measureText(NAME).width > W-40 && fs > 20);
+  g.fillText(NAME, W/2, H/2+4);
+  const d = g.getImageData(0,0,W,H).data, P = []; let x0=W, x1=0, y0=H, y1=0;
+  for(let y=0;y<H;y+=2) for(let x=0;x<W;x+=2) if(d[(y*W+x)*4+3]>128){ P.push(x,y); if(x<x0)x0=x; if(x>x1)x1=x; if(y<y0)y0=y; if(y>y1)y1=y; }
+  if(!P.length){ NAME = ''; return; }
+  const bw = x1-x0+2, bh = y1-y0+2, sc = Math.min(27/bw, 13/bh), cx = (x0+x1)/2, cy = (y0+y1)/2, n = P.length/2;
+  for(let i=0;i<N;i++){
+    const k = (Math.random()*n|0)*2;
+    NT[i*3] = (P[k]-cx+(Math.random()-.5)*2)*sc; NT[i*3+1] = -(P[k+1]-cy+(Math.random()-.5)*2)*sc; NT[i*3+2] = (Math.random()-.5)*1.2;
+  }
+}
+try{ document.getElementById('nm').value = localStorage.getItem('hname') || ''; }catch(e){}
+
 /* music */
-const mf = document.getElementById('mf'); let audio = null;
+const mf = document.getElementById('mf');
+let audio = null, actx = null, master = null, synthTimer = null, step = 0, nextT = 0, usingSynth = false, musicOn = false;
+const NOTE = m=>440*Math.pow(2,(m-69)/12);
+const PROG = [[57,60,64],[53,57,60],[48,52,55],[55,59,62]];
+function ensureCtx(){
+  if(actx) return;
+  actx = new (window.AudioContext||window.webkitAudioContext)();
+  master = actx.createGain(); master.gain.value = .55;
+  const dl = actx.createDelay(); dl.delayTime.value = .38;
+  const fb = actx.createGain(); fb.gain.value = .38; dl.connect(fb); fb.connect(dl);
+  master.connect(actx.destination); master.connect(dl); dl.connect(actx.destination);
+}
+function tone(m,t,dur,type,vol){
+  const o = actx.createOscillator(), g = actx.createGain();
+  o.type = type; o.frequency.value = NOTE(m);
+  g.gain.setValueAtTime(0,t); g.gain.linearRampToValueAtTime(vol,t+.04); g.gain.exponentialRampToValueAtTime(.0001,t+dur);
+  o.connect(g); g.connect(master); o.start(t); o.stop(t+dur+.05);
+}
+function sched(){
+  while(nextT < actx.currentTime+.8){
+    const ch = PROG[Math.floor(step/8)%4], i = step%8;
+    if(i===0){ ch.forEach(n=>tone(n-12,nextT,3.8,'sine',.07)); tone(ch[0]-24,nextT,3.8,'sine',.1); }
+    tone(ch[[0,1,2,1,2,1,2,1][i]]+12,nextT,1.2,'triangle',.06);
+    if(i===0||i===4) tone(ch[2]+24,nextT+.22,1.4,'sine',.035);
+    nextT += .46; step++;
+  }
+}
+function synthStart(){ ensureCtx(); actx.resume(); if(!synthTimer){ nextT = actx.currentTime+.1; step = 0; synthTimer = setInterval(sched,200); } }
+function synthStop(){ clearInterval(synthTimer); synthTimer = null; }
+function fallback(){ if(!musicOn || usingSynth) return; usingSynth = true; audio = null; synthStart(); }
+function musicStart(){
+  musicOn = true; if(btns.music) btns.music.classList.add('on');
+  try{ ensureCtx(); actx.resume(); }catch(e){}
+  if(usingSynth){ synthStart(); return; }
+  if(audio){ audio.play().catch(()=>{}); return; }
+  audio = new Audio('music.mp3'); audio.loop = true;
+  audio.addEventListener('error', fallback, {once:true});
+  audio.play().catch(fallback);
+}
+function musicStop(){ musicOn = false; if(audio) audio.pause(); synthStop(); if(btns.music) btns.music.classList.remove('on'); }
+function musicToggle(){ musicOn ? musicStop() : musicStart(); }
 mf.onchange = ()=>{
   const f = mf.files[0]; if(!f) return;
-  if(audio){audio.pause(); URL.revokeObjectURL(audio.src);}
-  audio = new Audio(URL.createObjectURL(f)); audio.loop = true; audio.play().catch(()=>{});
-  btns.music.classList.add('on');
+  if(audio) audio.pause(); synthStop(); usingSynth = false;
+  audio = new Audio(URL.createObjectURL(f)); audio.loop = true; musicOn = true;
+  audio.play().catch(()=>{}); btns.music.classList.add('on');
 };
 
 /* ---------- Gestures ---------- */
@@ -205,7 +276,7 @@ function act(g){
   if(was==='down' && prevMode){ setMode(prevMode); prevMode = null; }
   if(g==='open') setMode('heart');
   else if(g==='fist') setMode('heart3d');
-  else if(g==='one') setMode('stream');
+  else if(g==='one') setMode(NAME ? 'name' : 'stream');
   else if(g==='ily') setMode('rain');
   else if(g==='peace') setMode('galaxy');
   else if(g==='up'){ burst=3; palette=(palette+1)%PALETTES.length; paint(); }
@@ -252,6 +323,7 @@ const V = {x:0,y:0,z:0};
 function target(i, t){
   const a = s1[i], b = s2[i], c = s3[i];
   switch(mode){
+    case 'name': V.x=NT[i*3]; V.y=NT[i*3+1]; V.z=NT[i*3+2]; break;
     case 'heart': V.x=H2[i*3]; V.y=H2[i*3+1]; V.z=H2[i*3+2]; break;
     case 'heart3d': {
       const ca = Math.cos(t*.7), sa = Math.sin(t*.7), x = H3[i*3], z = H3[i*3+2];
@@ -287,10 +359,19 @@ function frame(){
     for(let i=0;i<N;i++){
       target(i,t);
       const k = 1 + burst*(.5+s2[i]*1.2);
-      const j = .12;
+      const j = .25;
       pos[i*3]   += (V.x*k + (Math.random()-.5)*j - pos[i*3])*e;
       pos[i*3+1] += (V.y*k + (Math.random()-.5)*j - pos[i*3+1])*e;
       pos[i*3+2] += (V.z*k - pos[i*3+2])*e;
+    }
+    const tt = t*.6, lk = mode==='name' ? .25 : 1;
+    for(let i=0;i<N;i++){
+      const x=pos[i*3], y=pos[i*3+1], z=pos[i*3+2], vx=x-pv[i*3], vy=y-pv[i*3+1];
+      const th = s3[i]*6.283 + tt*(s2[i]-.5)*2;
+      const len = (1.4 + s1[i]*2.6)*lk + Math.hypot(vx,vy)*6;
+      lp[i*6]=x-Math.cos(th)*len-vx*3; lp[i*6+1]=y-Math.sin(th)*len-vy*3; lp[i*6+2]=z;
+      lp[i*6+3]=x; lp[i*6+4]=y; lp[i*6+5]=z;
+      pv[i*3]=x; pv[i*3+1]=y;
     }
     geo.attributes.position.needsUpdate = true;
   }
@@ -304,8 +385,9 @@ function frame(){
 const startEl = document.getElementById('start'), video = document.getElementById('cam');
 let started = false;
 function begin(){ startEl.style.display = 'none'; if(!started){ started = true; frame(); } }
-document.getElementById('nocam').onclick = ()=>{ video.style.display='none'; gestEl.textContent='Жест: камерасыз'; begin(); };
+document.getElementById('nocam').onclick = ()=>{ musicStart(); setName(document.getElementById('nm').value); video.style.display='none'; gestEl.textContent='Жест: камерасыз'; begin(); };
 document.getElementById('go').onclick = async ()=>{
+  musicStart(); setName(document.getElementById('nm').value);
   const btn = document.getElementById('go'), hint = document.getElementById('hint');
   btn.disabled = true; btn.textContent = '⏳ Күтүңүз…'; hint.textContent = '';
   let stream;
